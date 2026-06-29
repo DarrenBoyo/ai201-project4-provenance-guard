@@ -109,9 +109,9 @@ Likewise, heavily edited AI-generated writing may avoid these phrases and theref
 
 ---
 
-# Confidence Scoring
+## Confidence Scoring
 
-Both signals produce values between **0.0** and **1.0**, where larger values indicate more AI-like characteristics.
+Each detection signal produces a score between **0.0** and **1.0**, where larger values indicate stronger AI-like characteristics.
 
 The final confidence score is calculated using a weighted average:
 
@@ -119,56 +119,73 @@ The final confidence score is calculated using a weighted average:
 confidence = (sentence_score * 0.3) + (vocabulary_score * 0.7)
 ```
 
-The second signal receives a larger weight because testing showed it separated AI-like writing from casual human writing more effectively than sentence-length variation.
+The second detection signal receives a larger weight because testing showed that the AI marker and formal-language detector distinguished AI-generated text from human-written text more effectively than sentence-length variation alone. The sentence-length signal still contributes to the overall score by measuring writing rhythm and structural consistency.
 
-The final score maps to three confidence ranges:
+The confidence score is mapped to three transparency categories:
 
-| Confidence | Result |
-|------------|--------|
-| 0.00 – 0.39 | Likely Human |
-| 0.40 – 0.69 | Uncertain |
-| 0.70 – 1.00 | Likely AI-Assisted |
+| Confidence Score | Classification       |
+| ---------------- | -------------------- |
+| 0.00 – 0.39      | Likely Human-Written |
+| 0.40 – 0.69      | Uncertain            |
+| 0.70 – 1.00      | Likely AI-Assisted   |
 
-## Validation
+### Validation
 
-I tested the scoring using four different writing samples:
+To ensure the scoring system produced meaningful variation, I tested the detector using four different writing samples: a clearly AI-generated paragraph, a clearly human-written paragraph, formal academic writing, and lightly edited AI text.
 
-- Clearly AI-generated
-- Clearly human-written
-- Formal human writing
-- Lightly edited AI writing
+Two representative examples are shown below.
 
-The AI sample received a substantially higher score than the human sample.
+### Example 1 — High Confidence AI
 
-### Example: High Confidence AI
+**Input (excerpt)**
 
-```json
-{
-    "confidence": 0.79,
-    "attribution": "likely_ai",
-    "sentence_variation_score": 0.41,
-    "vocabulary_diversity_score": 0.96
-}
-```
+> "Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous..."
 
-### Example: Low Confidence Human
+**Output**
 
 ```json
 {
-    "confidence": 0.03,
-    "attribution": "likely_human",
-    "sentence_variation_score": 0.10,
-    "vocabulary_diversity_score": 0.00
+  "confidence": 0.79,
+  "attribution": "likely_ai",
+  "sentence_variation_score": 0.41,
+  "vocabulary_diversity_score": 0.96
 }
 ```
+
+The confidence score is high because the submission contains several formal AI-style phrases, including *"It is important to note," "transformative paradigm shift," "ethical implications,"* and *"stakeholders."* These phrases strongly influenced the second detection signal.
+
+---
+
+### Example 2 — Low Confidence Human
+
+**Input (excerpt)**
+
+> "ok so i finally tried that new ramen place downtown and honestly? underwhelming..."
+
+**Output**
+
+```json
+{
+  "confidence": 0.03,
+  "attribution": "likely_human",
+  "sentence_variation_score": 0.10,
+  "vocabulary_diversity_score": 0.00
+}
+```
+
+This submission received a much lower confidence score because it is conversational, informal, and does not contain the formal language patterns targeted by the second detection signal.
+
+These examples demonstrate that the confidence scoring system produces meaningful variation instead of assigning nearly identical confidence values to every submission.
 
 ---
 
 # Transparency Labels
 
-The API displays one of three transparency labels.
+The transparency label returned by the API changes based on the final confidence score.
 
-## Likely AI-Assisted
+## High-Confidence AI
+
+Displayed when the confidence score is **0.70 or higher**.
 
 ```text
 Likely AI-Assisted
@@ -178,7 +195,9 @@ This text shows several patterns commonly associated with AI-generated writing. 
 
 ---
 
-## Likely Human-Written
+## High-Confidence Human
+
+Displayed when the confidence score is **0.39 or lower**.
 
 ```text
 Likely Human-Written
@@ -190,6 +209,8 @@ This text shows patterns commonly associated with human writing. This result is 
 
 ## Uncertain
 
+Displayed when the confidence score falls between **0.40 and 0.69**.
+
 ```text
 Uncertain
 
@@ -198,125 +219,57 @@ The system found mixed signals. Some patterns may look AI-assisted, while others
 
 ---
 
-# Appeals Workflow
-
-Creators can challenge a classification using the `/appeal` endpoint.
-
-The request contains:
-
-```json
-{
-    "content_id": "...",
-    "creator_reasoning": "I wrote this myself."
-}
-```
-
-When an appeal is submitted the system:
-
-1. Records the appeal.
-2. Updates the submission status to **under_review**.
-3. Adds an appeal event to the audit log.
-4. Returns a confirmation response.
-
-The audit log stores:
-
-- content ID
-- timestamp
-- appeal status
-- creator reasoning
-- event type
-
----
-
-# Rate Limiting
-
-The `/submit` endpoint uses Flask-Limiter with the following limits:
-
-```python
-@limiter.limit("10 per minute;100 per day")
-```
-
-### Why these limits?
-
-A normal user submitting their own work is unlikely to submit more than ten pieces of writing within one minute.
-
-The daily limit of one hundred submissions still allows frequent testing while preventing automated abuse or denial-of-service attacks.
-
-During testing, requests beyond the limit correctly returned **HTTP 429 (Too Many Requests).**
-
----
-
-# Audit Log
-
-Every submission creates a structured JSON log entry.
-
-Each entry contains:
-
-- Timestamp
-- Content ID
-- Creator ID
-- Attribution
-- Confidence score
-- Sentence variation score
-- AI marker score
-- Transparency label
-- Appeal status
-- Event type
-
-Appeals generate additional log entries with:
-
-- Status = `under_review`
-- Appeal reasoning
-- Event type = `appeal_submitted`
-
-The `/log` endpoint returns the most recent audit log entries as JSON.
-
----
-
 # Known Limitations
 
-One limitation is **formal academic writing**.
+The current system relies on lightweight heuristic signals rather than a trained machine learning model, so there are situations where it may misclassify content.
 
-Research papers and technical reports often use phrases similar to AI-generated writing, causing the AI marker signal to produce higher confidence scores even when the text is entirely human-written.
+One example is **formal academic or technical writing**. Research papers, policy reports, and business documents often contain transition phrases and formal vocabulary such as *"furthermore," "stakeholders,"* and *"fundamental."* Because the second detection signal searches for these patterns, the system may incorrectly assign a higher AI confidence score to writing that was created entirely by a human.
 
-Another limitation is **edited AI output**.
+Another limitation is **AI-generated text that has been heavily edited**. If a user rewrites AI-generated text to remove obvious AI phrases and introduces more natural sentence variation, the heuristic signals may incorrectly classify the submission as human-written even though AI was used during drafting.
 
-If AI-generated text is rewritten to remove obvious AI phrases and make sentence lengths more varied, the system may incorrectly classify it as human-written.
-
-In a production environment, I would replace these simple heuristics with a trained machine learning model evaluated on a much larger and more diverse dataset.
+If this project were deployed in a production environment, I would replace the heuristic detector with a trained machine learning model, evaluate it using a larger and more diverse validation dataset, and calibrate the confidence thresholds using empirical performance data.
 
 ---
 
 # Spec Reflection
 
-## How the specification helped
+## One way the specification helped
 
-The milestone-based specification encouraged building one feature at a time. Developing the first detection signal before adding the second made debugging much easier because each component could be tested independently.
+The milestone-based structure encouraged incremental development. Building the submission endpoint first, then implementing one detection signal before adding confidence scoring and production features, made it much easier to isolate bugs and verify each component before moving to the next milestone.
 
-## Where implementation diverged
+## One way the implementation diverged
 
-The original plan called for vocabulary diversity as the second signal. During testing, vocabulary diversity produced very similar scores for nearly every input, making it ineffective. I replaced it with an AI marker and formal-language signal because it better separated the required AI and human test cases.
+My original design planned to use vocabulary diversity as the second detection signal. During testing, vocabulary diversity produced nearly identical values for many different writing samples, making it ineffective for distinguishing AI-generated text from human-written text. I replaced that signal with an AI marker and formal-language detector because it produced more meaningful confidence scores while still satisfying the requirement to combine multiple detection signals.
 
 ---
 
 # AI Usage
 
-## Instance 1
+## Instance 1 — Flask Application
 
-I used AI to generate the initial Flask application, including the API structure, `/submit` endpoint, input validation, JSON responses, and audit logging.
+I directed the AI assistant to generate the initial Flask application, including the API structure, the `/submit` endpoint, request validation, JSON responses, and helper functions for reading and writing the audit log.
 
-I reviewed and modified the generated code to match my planned API specification and ensured every response included the required fields.
+The generated code provided a solid starting point, but I revised it to generate unique `content_id` values, match the API contract defined in my planning document, and ensure that every submission produced a structured audit log entry.
 
-## Instance 2
+---
 
-I used AI to help generate the second detection signal and confidence-scoring logic.
+## Instance 2 — Detection Signals and Confidence Scoring
 
-The initial vocabulary-diversity approach did not distinguish between the required test inputs, so I replaced it with an AI marker detection approach and adjusted the signal weights after testing multiple examples until the confidence scores better matched the expected outcomes.
+I asked the AI assistant to generate the second detection signal and the confidence-scoring logic using the architecture diagram and planning document.
 
-## Instance 3
+The first implementation used vocabulary diversity as the second signal. After testing with the required examples, I discovered that vocabulary diversity produced nearly identical scores for most submissions. I replaced it with an AI marker and formal-language detector and adjusted the confidence weighting from an equal average to a weighted average so that the scoring better matched the expected behavior of the required test cases.
 
-I used AI to help implement the `/appeal` endpoint, transparency label generation, and Flask-Limiter configuration. I manually tested each feature using `curl` commands to verify that appeals were logged correctly and that rate limiting returned HTTP 429 responses after the request limit was exceeded.
+---
 
+## Instance 3 — Production Features
+
+I used the AI assistant to help implement the transparency label generator, the `/appeal` endpoint, and Flask-Limiter integration.
+
+After reviewing the generated code, I manually tested every feature using `curl` commands. I verified that:
+
+* the correct transparency label was returned for each confidence range,
+* submitting an appeal created an audit log entry with `"status": "under_review"`,
+* and exceeding the configured submission limit resulted in **HTTP 429 (Too Many Requests)** responses, confirming that rate limiting was functioning correctly.
 ---
 
 # Running the Project
